@@ -210,13 +210,20 @@ func (n *Net) StartProcess() (int, error) {
 	}
 
 	// Extract the fds from the listeners.
-	files := make([]*os.File, len(listeners))
-	for i, l := range listeners {
-		files[i], err = l.(filer).File()
+	// NOTE: gracenet not remove closed fd from active, so pass closeed fd to childprocess
+	var files []*os.File
+	fcnt := 0
+	for _, l := range listeners {
+		fd, err := l.(filer).File()
 		if err != nil {
+			if isUseOfClosedError(err) {
+				continue
+			}
 			return 0, err
 		}
-		defer files[i].Close()
+		files = append( files, fd)
+		defer files[fcnt].Close()
+		fcnt++
 	}
 
 	// Use the original binary location. This works with symlinks such that if
@@ -233,7 +240,7 @@ func (n *Net) StartProcess() (int, error) {
 			env = append(env, v)
 		}
 	}
-	env = append(env, fmt.Sprintf("%s%d", envCountKeyPrefix, len(listeners)))
+	env = append(env, fmt.Sprintf("%s%d", envCountKeyPrefix, len(files)))
 
 	allFiles := append([]*os.File{os.Stdin, os.Stdout, os.Stderr}, files...)
 	process, err := os.StartProcess(argv0, os.Args, &os.ProcAttr{
@@ -249,4 +256,15 @@ func (n *Net) StartProcess() (int, error) {
 
 type filer interface {
 	File() (*os.File, error)
+}
+
+// NOTE: It's work on Go 1.X, Go 2.X maybe change
+func isUseOfClosedError(err error) bool {
+	if err == nil {
+		return false
+	}
+	if opErr, ok := err.(*net.OpError); ok {
+		err = opErr.Err
+	}
+	return err.Error() == "use of closed network connection"
 }
