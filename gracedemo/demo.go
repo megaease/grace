@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"sync/atomic"
 	"time"
 
 	"github.com/facebookgo/grace/gracehttp"
@@ -17,6 +18,8 @@ var (
 	address1 = flag.String("a1", ":48568", "First address to bind to.")
 	address2 = flag.String("a2", ":48569", "Second address to bind to.")
 	now      = time.Now()
+
+	parallel_count int32
 )
 
 func main() {
@@ -31,6 +34,24 @@ func main() {
 func newHandler(name string) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/sleep/", func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&parallel_count, 1)
+		defer func() {
+			atomic.AddInt32(&parallel_count, -1)
+		}()
+
+		c := atomic.LoadInt32(&parallel_count)
+		if c <= 1 {
+			time.Sleep(1 * time.Millisecond)
+		} else if c <= 10 {
+			time.Sleep(10 * time.Millisecond)
+		} else if c <= 20 {
+			time.Sleep(22 * time.Millisecond)
+		} else if c < 50 {
+			time.Sleep( 100 * time.Millisecond)
+		} else {
+			time.Sleep(200 * time.Millisecond)
+		}
+
 		duration, err := time.ParseDuration(r.FormValue("duration"))
 		if err != nil {
 			http.Error(w, err.Error(), 400)
